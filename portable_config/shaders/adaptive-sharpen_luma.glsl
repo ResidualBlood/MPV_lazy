@@ -22,25 +22,22 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 // THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// Adaptive sharpen - version 2021-10-17
-// Tuned for use post-resize, EXPECTS FULL RANGE GAMMA LIGHT (requires ps >= 3.0)
+// MOD from adaptive-sharpen.glsl
 
 //!HOOK LUMA
 //!BIND HOOKED
-//!DESC adaptive-sharpen-luma
+//!DESC adaptive-sharpen_luma
 
 //--------------------------------------- Settings ------------------------------------------------
 
 #define curve_height    1.0                  // Main control of sharpening strength [>0]
                                              // 0.3 <-> 2.0 is a reasonable range of values
 
-#define anime_mode      false                // Only darken edges
+#define linear_laplace  false                // Enable when applying this shader at native resolution or
+                                             // after a super-resolution. Also could be useful for anime
 
 #define overshoot_ctrl  false                // Allow for higher overshoot if the current edge pixel
                                              // is surrounded by similar edge pixels
-
-#define video_level_out false                // True to preserve BTB & WTW (minor summation error)
-                                             // Normally it should be set to false
 
 // Defined values under this row are "optimal" DO NOT CHANGE IF YOU DO NOT KNOW WHAT YOU ARE DOING!
 
@@ -72,7 +69,7 @@
 #define wpmean(a,b,w)  ( pow(w*pow(abs(a), pm_p) + abs(1.0-w)*pow(abs(b), pm_p), (1.0/pm_p)) )
 
 // Get destination pixel values
-#define get(x,y)       ( sat(HOOKED_texOff(vec2(x, y)).rgb) )
+#define get(x,y)       ( HOOKED_texOff(vec2(x, y)).rgb )
 #define sat(x)         ( clamp(x, 0.0, 1.0) )
 #define dxdy(val)      ( length(fwidth(val)) ) // =~1/2.5 hq edge without c_comp
 
@@ -98,7 +95,7 @@ vec4 hook() {
                           dxdy(c[10]), dxdy(c[11]), dxdy(c[12]));
 
     // Blur, gauss 3x3
-    vec3  blur   = (2.0 * (c[2]+c[4]+c[5]+c[7]) + (c[1]+c[3]+c[6]+c[8]) + 4.0 * c[0]) / 16.0;
+    vec3  blur   = sat((2.0 * (c[2]+c[4]+c[5]+c[7]) + (c[1]+c[3]+c[6]+c[8]) + 4.0 * c[0]) / 16.0);
 
     // Contrast compression, center = 0.5, scaled to 1/3
     float c_comp = sat(0.266666681f + 0.9*exp2(dot(blur, vec3(-7.4/3.0))));
@@ -136,7 +133,8 @@ vec4 hook() {
         cs = mix(cs, vec2(L_compr_high, D_compr_high), sat(2.4002*sbe - 2.282));
     }
 
-    float luma[25] = float[](c[0].x, c[1].x, c[2].x, c[3].x, c[4].x, c[5].x, c[6].x,
+    // ...
+    float luma[25] = float[](c[0].x,  c[1].x,  c[2].x,  c[3].x,  c[4].x,  c[5].x,  c[6].x,
                              c[7].x,  c[8].x,  c[9].x,  c[10].x, c[11].x, c[12].x,
                              c[13].x, c[14].x, c[15].x, c[16].x, c[17].x, c[18].x,
                              c[19].x, c[20].x, c[21].x, c[22].x, c[23].x, c[24].x);
@@ -181,12 +179,15 @@ vec4 hook() {
     {
         float lowthr = clamp((20.*4.5*c_comp*e[pix + 1] - 0.221), 0.01, 1.0);
 
-        neg_laplace += luma[pix+1] * weights[pix] * lowthr;
+        neg_laplace += (linear_laplace ? luma[pix+1] * luma[pix+1] : luma[pix+1]) * weights[pix] * lowthr;
         weightsum   += weights[pix] * lowthr;
         lowthrsum   += lowthr / 12.0;
     }
 
     neg_laplace = neg_laplace / weightsum;
+
+    if (linear_laplace)
+        neg_laplace = sqrt(neg_laplace);
 
     // Compute sharpening magnitude function
     float sharpen_val = curve_height/(curve_height*curveslope*pow(edge, 3.5) + 0.625);
@@ -242,13 +243,13 @@ vec4 hook() {
     pn_scale = min(pn_scale, scale_lim*(1.0 - scale_cs) + pn_scale*scale_cs);
 
     // Soft limited anti-ringing with tanh, wpmean to control compression slope
-    sharpdiff = (anime_mode ? 0. :
-                wpmean(max(sharpdiff, 0.0), soft_lim( max(sharpdiff, 0.0), pn_scale.x ), cs.x ))
+    sharpdiff = wpmean(max(sharpdiff, 0.0), soft_lim( max(sharpdiff, 0.0), pn_scale.x ), cs.x )
               - wpmean(min(sharpdiff, 0.0), soft_lim( min(sharpdiff, 0.0), pn_scale.y ), cs.y );
-
+    /*
     float sharpdiff_lim = sat(c0_Y + sharpdiff) - c0_Y;
-    float satmul = (c0_Y + max(sharpdiff_lim*0.9, sharpdiff_lim)*1.03 + 0.03)/(c0_Y + 0.03);
-    vec3 res = c0_Y + (sharpdiff_lim*3.0 + sharpdiff)/4.0 + (c[0] - c0_Y)*satmul;
-
-    return vec4(video_level_out == true ? res + HOOKED_texOff(0).rgb - c[0] : res, HOOKED_texOff(0).a);
+    float satmul = (c0_Y + max(sharpdiff_lim*0.9, sharpdiff_lim)*0.3 + 0.03)/(c0_Y + 0.03);
+    vec3 res = c0_Y + sharpdiff_lim + (c[0] - c0_Y)*satmul;
+    */
+    return vec4(sharpdiff + c[0], HOOKED_texOff(0).a);
 }
+
