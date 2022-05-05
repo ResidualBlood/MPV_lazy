@@ -1,14 +1,16 @@
-### rife v4 补帧，默认以质量交换性能
+### rife v4 倍帧，默认以质量交换性能
 
 import vapoursynth as vs
 from vapoursynth import core
 
 input = video_in
+
+max_Leng = 720
 GPU = 0
 GPU_t = 2
-##使用的显卡序号，0为排序一号；使用的显卡线程数
-max_Leng = 720
-##若视频的短边超过该长度将被强制降采样，高端显卡的推荐值范围 1080 -- 720 （如果对你的显卡非常自信，可以尝试把该值提高到 2160）
+# 若视频的短边超过该长度将被强制降采样，高端显卡的推荐值范围 1080 -- 720 （如果对你的显卡非常自信，可以尝试把该值提高到 2160）
+# 使用的显卡序号，0为排序一号
+# 使用的显卡线程数
 
 if input.width >= input.height :
 	short_edge = input.height
@@ -22,6 +24,7 @@ else :
 	h_ds = max_Leng2
 
 if (container_fps < 32) :
+
 	cut0 = input.misc.SCDetect()
 
 	if short_edge > max_Leng :
